@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: This sample application demonstrates processing Athena data manifest and Parquet files using AWS Step Functions Distributed Map.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 300
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  IoTAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.handler
+      Role: !GetAtt LambdaFunctionRole.Arn
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref IoTDataBucket
+
+  SensorSummaryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: DeviceId
+          AttributeType: S
+        - AttributeName: AnalysisDate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: DeviceId
+          KeyType: HASH
+        - AttributeName: AnalysisDate
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  IoTDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  IoTAnalyticsResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  LambdaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${IoTDataBucket.Arn}'
+                  - !Sub '${IoTDataBucket.Arn}/*'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}/*'
+
+  DistributedMapStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt IoTAnalyticsFunction.Arn
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt SensorSummaryTable.Arn
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${IoTDataBucket.Arn}'
+                  - !Sub '${IoTDataBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}/*'
+        - PolicyName: DistributedMapPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:IoTSensorAnalyticsStateMachine*'
+                  - !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:*:*'
+              - Effect: Allow
+                Action: states:RedriveExecution
+                Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:*/*:*'
+
+  IoTSensorAnalyticsStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/stepfunction-definition.asl.json
+      DefinitionSubstitutions:
+        Partition: !Ref AWS::Partition
+        AccountId: !Ref AWS::AccountId
+        IoTAnalyticsFunctionArn: !GetAtt IoTAnalyticsFunction.Arn
+        SensorSummaryTableName: !Ref SensorSummaryTable
+        IoTDataBucketName: !Ref IoTDataBucket
+        IoTAnalyticsResultsBucketName: !Ref IoTAnalyticsResultsBucket
+      Role: !GetAtt DistributedMapStateMachineRole.Arn
+      Tracing:
+        Enabled: true
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref IoTSensorAnalyticsStateMachine
+  IoTDataBucketName:
+    Value: !Ref IoTDataBucket
+  IoTAnalyticsResultsBucketName:
+    Value: !Ref IoTAnalyticsResultsBucket
+  SensorSummaryTableName:
+    Value: !Ref SensorSummaryTable
+
