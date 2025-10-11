@@ -42,8 +42,8 @@ The system detects the following as anomalies:
 
 Clone the GitHub repository in a new folder and navigate to project root folder:
 ```bash
-git clone TODO
-cd sample-stepfunctions-json-array-processor
+git clone https://github.com/aws-samples/sample-stepfunctions-athena-manifest-parquet-file-processor.git
+cd sample-stepfunctions-athena-manifest-parquet-file-processor
 ```
 
 ### 2. Install Python dependencies
