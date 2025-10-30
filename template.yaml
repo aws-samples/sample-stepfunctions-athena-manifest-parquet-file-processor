@@ -20,22 +20,37 @@ Resources:
       Environment:
         Variables:
           BUCKET_NAME: !Ref IoTDataBucket
-
-  SensorSummaryTable:
-    Type: AWS::DynamoDB::Table
+  
+  IoTSensorDataFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
     Properties:
-      AttributeDefinitions:
-        - AttributeName: DeviceId
-          AttributeType: S
-        - AttributeName: AnalysisDate
-          AttributeType: S
-      KeySchema:
-        - AttributeName: DeviceId
-          KeyType: HASH
-        - AttributeName: AnalysisDate
-          KeyType: RANGE
-      BillingMode: PAY_PER_REQUEST
-
+      DeliveryStreamName: !Sub '${AWS::StackName}-IoTSensorDataFirehose'
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt IoTAnalyticsResultsBucket.Arn
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+        Prefix: ""
+        ErrorOutputPrefix: ""
+        BufferingHints:
+          SizeInMBs: 1
+          IntervalInSeconds: 15
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Sub '/aws/kinesisfirehose/${AWS::StackName}-IoTSensorDataFirehose'
+          LogStreamName: 'S3Delivery'
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: AppendDelimiterToRecord
+              Parameters: []
+        S3BackupMode: Disabled
+        DataFormatConversionConfiguration:
+          Enabled: false
+        FileExtension: ".json"
+        CustomTimeZone: "UTC"
+  
   IoTDataBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -62,6 +77,41 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
+  FirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+      Policies:
+        - PolicyName: FirehoseS3AccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetObjectLocation
+                Resource: 
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}/*'
+        - PolicyName: FirehoseCloudWatchLogsPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${AWS::StackName}-IoTSensorDataFirehose:log-stream:*'
+              
   LambdaFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -109,13 +159,6 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !GetAtt IoTAnalyticsFunction.Arn
-        - PolicyName: DynamoDBAccessPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: dynamodb:PutItem
-                Resource: !GetAtt SensorSummaryTable.Arn
         - PolicyName: S3AccessPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -124,11 +167,13 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
+                  - s3:PutObject
                 Resource:
                   - !Sub '${IoTDataBucket.Arn}'
                   - !Sub '${IoTDataBucket.Arn}/*'
               - Effect: Allow
                 Action:
+                  - s3:GetObject
                   - s3:PutObject
                   - s3:ListBucket
                 Resource:
@@ -149,6 +194,43 @@ Resources:
               - Effect: Allow
                 Action: states:RedriveExecution
                 Resource: !Sub 'arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:*/*:*'
+        - PolicyName: AthenaQueryPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetObject
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                Resource:                  
+                  - !Sub '${IoTDataBucket.Arn}'
+                  - !Sub '${IoTDataBucket.Arn}/*'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}'
+                  - !Sub '${IoTAnalyticsResultsBucket.Arn}/*'
+                  - !Sub 'arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary'
+                  - !Sub 'arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:datacatalog/*'
+                  - !Sub 'arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/*'
+                  - !Sub 'arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/*'
+                  - !Sub 'arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:userDefinedFunction/*'
+        - PolicyName: FirehoseInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !Sub 'arn:${AWS::Partition}:firehose:${AWS::Region}:${AWS::AccountId}:deliverystream/${AWS::StackName}-IoTSensorDataFirehose'
 
   IoTSensorAnalyticsStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -158,9 +240,9 @@ Resources:
         Partition: !Ref AWS::Partition
         AccountId: !Ref AWS::AccountId
         IoTAnalyticsFunctionArn: !GetAtt IoTAnalyticsFunction.Arn
-        SensorSummaryTableName: !Ref SensorSummaryTable
         IoTDataBucketName: !Ref IoTDataBucket
         IoTAnalyticsResultsBucketName: !Ref IoTAnalyticsResultsBucket
+        IoTSensorDataFirehoseName: !Ref IoTSensorDataFirehose
       Role: !GetAtt DistributedMapStateMachineRole.Arn
       Tracing:
         Enabled: true
@@ -172,6 +254,5 @@ Outputs:
     Value: !Ref IoTDataBucket
   IoTAnalyticsResultsBucketName:
     Value: !Ref IoTAnalyticsResultsBucket
-  SensorSummaryTableName:
-    Value: !Ref SensorSummaryTable
-
+  IoTSensorDataFirehoseName:
+    Value: !Ref IoTSensorDataFirehose

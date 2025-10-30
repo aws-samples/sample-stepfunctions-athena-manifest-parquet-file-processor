@@ -16,10 +16,10 @@ def handler(event, context):
         }
     
     # Extract values from the single reading
-    device_id = sensor_reading.get('deviceId', 'unknown')
+    device_id = sensor_reading.get('deviceid', 'unknown')
     temperature = sensor_reading.get('temperature')
     humidity = sensor_reading.get('humidity')
-    battery_level = sensor_reading.get('batteryLevel')
+    battery_level = sensor_reading.get('batterylevel')
     reading_timestamp = sensor_reading.get('timestamp')
     
     # Detect anomalies for this single reading
@@ -56,19 +56,19 @@ def handler(event, context):
         analysis_date = datetime.now().isoformat().split('T')[0]
     
     return {
-        'deviceId': device_id,
-        'analysisDate': analysis_date,
-        'readingTimestamp': reading_timestamp,
-        'readingsCount': 1,  # Single reading processed
+        'deviceid': device_id,
+        'analysisdate': analysis_date,
+        'readingtimestamp': reading_timestamp,
+        'readingscount': 1,  # Single reading processed
         'metrics': {
             'temperature': round(temperature, 2) if temperature is not None else None,
             'humidity': round(humidity, 2) if humidity is not None else None,
-            'batteryLevel': round(battery_level, 2) if battery_level is not None else None,
+            'batterylevel': round(battery_level, 2) if battery_level is not None else None,
             'latitude': sensor_reading.get('latitude'),
             'longitude': sensor_reading.get('longitude')
         },
         'anomalies': anomalies,
-        'anomalyCount': len(anomalies),
-        'healthStatus': 'healthy' if len(anomalies) == 0 else 'anomalies_detected',
+        'anomalycount': len(anomalies),
+        'healthstatus': 'healthy' if len(anomalies) == 0 else 'anomalies_detected',
         'timestamp': datetime.now().isoformat()
     }

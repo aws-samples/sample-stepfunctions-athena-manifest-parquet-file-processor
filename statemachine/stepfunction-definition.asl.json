@@ -1,8 +1,28 @@
 {
-  "Comment": "IoT sensor analytics using Distributed Map with Athena manifest and Parquet processing",
-  "StartAt": "ProcessSensorData",
+  "Comment": "IoT sensor analytics using Distributed Map with Athena manifest and Parquet files processing",
+  "StartAt": "GetDate",
   "QueryLanguage": "JSONata",
   "States": {
+    "GetDate": {
+      "Type": "Pass",
+      "Output": {
+        "Today": "{% $string('daily-data-parquet/' & $substring($states.context.State.EnteredTime, 0, 10)) & '/' %}",
+        "BucketName": "{% $states.input.IoTDataBucketName %}"
+      },
+      "Next": "Athena StartQueryExecution"
+    },
+    "Athena StartQueryExecution": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::athena:startQueryExecution.sync",
+      "Arguments": {
+        "QueryString": "{% \"UNLOAD (SELECT \\\"timestamp\\\", \\\"temperature\\\", \\\"humidity\\\", \\\"batterylevel\\\", \\\"latitude\\\", \\\"longitude\\\", \\\"deviceid\\\", \\\"deviceid\\\" AS deviceid_partition FROM \\\"IOTSensorData\\\".\\\"IOTSensorData\\\") TO 's3://\" & $states.input.BucketName & \"/\" & $states.input.Today & \"' WITH (format = 'PARQUET', compression = 'NONE', partitioned_by = ARRAY['deviceid_partition'])\" %}",
+        "WorkGroup": "primary"
+      },
+      "Output": {
+        "ManifestObjectKey": "{% $join([$states.result.QueryExecution.ResultConfiguration.OutputLocation, '-manifest.csv']) %}"
+      },
+      "Next": "ProcessSensorData"
+    },
     "ProcessSensorData": {
       "Type": "Map",
       "ItemProcessor": {
@@ -19,56 +39,18 @@
               "FunctionName": "${IoTAnalyticsFunctionArn}",
               "Payload": "{% $states.input %}"
             },
-            "Next": "StoreSensorSummary",
+            "Next": "SendToKinesisFirehose",
             "Assign": {
               "analysisResult": "{% $states.result.Payload %}"
             }
           },
-          "StoreSensorSummary": {
+          "SendToKinesisFirehose": {
             "Type": "Task",
-            "Resource": "arn:${Partition}:states:::dynamodb:putItem",
+            "Resource": "arn:aws:states:::aws-sdk:firehose:putRecord",
             "Arguments": {
-              "TableName": "${SensorSummaryTableName}",
-              "Item": {
-                "DeviceId": {
-                  "S": "{% $string($analysisResult.deviceId ? $analysisResult.deviceId : \"unknown\") %}"
-                },
-                "AnalysisDate": {
-                  "S": "{% $string($analysisResult.analysisDate ? $analysisResult.analysisDate : $substring($now(), 0, 10)) %}"
-                },
-                "ReadingsCount": {
-                  "N": "{% $string($analysisResult.readingsCount ? $analysisResult.readingsCount : 0) %}"
-                },
-                "Temperature": {
-                  "N": "{% $string($analysisResult.metrics.temperature ? $analysisResult.metrics.temperature : 0) %}"
-                },
-                "Humidity": {
-                  "N": "{% $string($analysisResult.metrics.humidity ? $analysisResult.metrics.humidity : 0) %}"
-                },
-                "BatteryLevel": {
-                  "N": "{% $string($analysisResult.metrics.batteryLevel ? $analysisResult.metrics.batteryLevel : 0) %}"
-                },
-                "ReadingTimestamp": {
-                  "S": "{% $string($analysisResult.readingTimestamp ? $analysisResult.readingTimestamp : $now()) %}"
-                },
-                "Latitude": {
-                  "N": "{% $string($analysisResult.metrics.latitude ? $analysisResult.metrics.latitude : 0) %}"
-                },
-                "Longitude": {
-                  "N": "{% $string($analysisResult.metrics.longitude ? $analysisResult.metrics.longitude : 0) %}"
-                },
-                "AnomalyCount": {
-                  "N": "{% $string($analysisResult.anomalyCount ? $analysisResult.anomalyCount : 0) %}"
-                },
-                "HealthStatus": {
-                  "S": "{% $string($analysisResult.healthStatus ? $analysisResult.healthStatus : \"unknown\") %}"
-                },
-                "ProcessedAt": {
-                  "S": "{% $string($analysisResult.timestamp ? $analysisResult.timestamp : $now()) %}"
-                },
-                "Anomalies": {
-                  "S": "{% $string($analysisResult.anomalies ? $analysisResult.anomalies : \"[]\") %}"
-                }
+              "DeliveryStreamName": "${IoTSensorDataFirehoseName}",
+              "Record": {
+                "Data": "{% $string($analysisResult) %}"
               }
             },
             "End": true
@@ -82,8 +64,8 @@
           "ManifestType": "ATHENA_DATA"
         },
         "Arguments": {
-          "Bucket": "${IoTDataBucketName}",
-          "Key": "manifests/daily/sensor-data-manifest.csv"
+          "Bucket": "{% $split($substringAfter($states.input.ManifestObjectKey, 's3://'), '/')[0] %}",
+          "Key": "{% $substringAfter($substringAfter($states.input.ManifestObjectKey, 's3://'), '/') %}"
         }
       },
       "MaxConcurrency": 50,

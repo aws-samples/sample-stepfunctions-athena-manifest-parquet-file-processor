@@ -30,11 +30,11 @@ def generate_sensor_data(device_id, date):
             humidity = 98 + random.random() * 2 if random.random() < 0.5 else 2 + random.random() * 3
         
         readings.append({
-            'deviceId': device_id,
+            'deviceid': device_id,
             'timestamp': f'{date}T{hour:02d}:00:00Z',
             'temperature': round(temperature, 2),
             'humidity': round(humidity, 2),
-            'batteryLevel': max(0, round(battery_level, 2)),
+            'batterylevel': max(0, round(battery_level, 2)),
             'latitude': 37.7749 + (random.random() - 0.5) * 0.1,
             'longitude': -122.4194 + (random.random() - 0.5) * 0.1
         })
@@ -73,60 +73,60 @@ def main():
     # Create local directories
     data_dir = Path('temp_data')
     daily_dir = data_dir / 'daily-data' / today
-    manifest_dir = data_dir / 'manifests' / 'daily'
+    # manifest_dir = data_dir / 'manifests' / 'daily'
     
     daily_dir.mkdir(parents=True, exist_ok=True)
-    manifest_dir.mkdir(parents=True, exist_ok=True)
+    # manifest_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Generating sample IoT data for {len(device_ids)} devices...")
     
     created_files = []
     
-    # Generate Parquet files for each device
+    # Generate CSV files for each device
     for device_id in device_ids:
         print(f"Generating data for {device_id}...")
         sensor_data = generate_sensor_data(device_id, today)
         
-        # Convert to DataFrame and save as Parquet
+        # Convert to DataFrame and save as CSV
         df = pd.DataFrame(sensor_data)
-        parquet_file = daily_dir / f'{device_id}.parquet'
-        df.to_parquet(parquet_file, engine='pyarrow', index=False)
+        csv_file = daily_dir / f'{device_id}.csv'
+        df.to_csv(csv_file, index=False)
         
-        s3_key = f'daily-data/{today}/{device_id}.parquet'
+        s3_key = f'daily-data/{today}/{device_id}.csv'
         created_files.append(f's3://{bucket_name}/{s3_key}')
         
         print(f"  Generated {len(sensor_data)} readings")
-    
+    '''
     # Create Athena manifest file
     manifest_file = manifest_dir / 'sensor-data-manifest.csv'
     with open(manifest_file, 'w') as f:
         for s3_url in created_files:
             f.write(f'{s3_url}\n')
-    
+    '''
     print(f"\nUploading files to S3 bucket: {bucket_name}")
     
-    # Upload Parquet files
+    # Upload CSV files
     for device_id in device_ids:
-        local_file = daily_dir / f'{device_id}.parquet'
-        s3_key = f'daily-data/{today}/{device_id}.parquet'
+        local_file = daily_dir / f'{device_id}.csv'
+        s3_key = f'daily-data/{today}/{device_id}.csv'
         
-        print(f"Uploading {device_id}.parquet...")
+        print(f"Uploading {device_id}.csv...")
         upload_to_s3(local_file, bucket_name, s3_key)
-    
+    '''
     # Upload manifest file
     manifest_s3_key = 'manifests/daily/sensor-data-manifest.csv'
     print("Uploading manifest file...")
     upload_to_s3(manifest_file, bucket_name, manifest_s3_key)
-    
+    '''
     # Clean up local files
     import shutil
     shutil.rmtree(data_dir)
     
     print(f"\n✅ Successfully generated and uploaded:")
-    print(f"   - {len(device_ids)} Parquet files")
-    print(f"   - 1 Athena manifest file")
+    print(f"   - {len(device_ids)} CSV files")
+    # print(f"   - 1 Athena manifest file")
     print(f"   - Total records: {len(device_ids) * 24}")
-    print(f"\nManifest location: s3://{bucket_name}/{manifest_s3_key}")
+    # print(f"\nManifest location: s3://{bucket_name}/{manifest_s3_key}")
 
 if __name__ == '__main__':
     main()
