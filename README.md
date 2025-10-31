@@ -80,7 +80,7 @@ Run the following command to generate sample test data and upload it to the inpu
    ```
 
 ### 5. Update the Amazon S3 location in Amazon Athena Workgoup
-In the Amazon Athena console, navigate to workgroups, select the workgroup named "primary" and clickc on Edit.
+In the Amazon Athena console, navigate to workgroups, select the workgroup named "primary" and click on Edit.
 In the Query result Configuration section, select as follows - 
    Management of query results - select Customer managed
    Location of query result - enter: ```s3://<IoTDataBucketName>```. Replace ```<IoTDataBucketName>``` with the value from `sam deploy` output.
