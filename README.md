@@ -66,7 +66,7 @@ Run the following commands to build and deploy the application
    ```
 
 Enter the following details:
-- Stack name: The CloudFormation stack name(for example, stepfunctions-athena-manifest-parquet-file-processor)
+- Stack name: The CloudFormation stack name(for example, sfn-parquet-file-processor)
 - AWS Region: A supported AWS Region (for example, us-east-1)
 - Keep rest of the components to default values.
 
