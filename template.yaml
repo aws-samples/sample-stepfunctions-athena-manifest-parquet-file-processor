@@ -24,7 +24,7 @@ Resources:
   IoTSensorDataFirehose:
     Type: AWS::KinesisFirehose::DeliveryStream
     Properties:
-      DeliveryStreamName: !Sub '${AWS::StackName}-IoTSensorDataFirehose'
+      DeliveryStreamName: !Sub '${AWS::StackName}-IoTSensor'
       DeliveryStreamType: DirectPut
       ExtendedS3DestinationConfiguration:
         BucketARN: !GetAtt IoTAnalyticsResultsBucket.Arn
